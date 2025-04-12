@@ -532,7 +532,7 @@
             }
         }
         
-        // Fetch viewers using the Twitch API
+        // Fix the fetchViewers function to include moderator_id
         async function fetchViewers() {
             if (!broadcasterId) {
                 console.error('No broadcaster ID available');
@@ -540,7 +540,10 @@
             }
             
             try {
-                const response = await fetch(`https://api.twitch.tv/helix/chat/chatters?broadcaster_id=${broadcasterId}`, {
+                // Use broadcaster as moderator since we need both parameters
+                const moderatorId = broadcasterId; // The broadcaster is also a moderator of their own channel
+                
+                const response = await fetch(`https://api.twitch.tv/helix/chat/chatters?broadcaster_id=${broadcasterId}&moderator_id=${moderatorId}`, {
                     headers: {
                         'Client-ID': config.clientId,
                         'Authorization': `Bearer ${config.accessToken}`
@@ -548,6 +551,8 @@
                 });
                 
                 if (!response.ok) {
+                    const errorData = await response.json();
+                    console.error('API error details:', errorData);
                     throw new Error(`API Error: ${response.status}`);
                 }
                 
