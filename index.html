@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bunny Viewer Extension</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: transparent;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        .floor {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 50px;
+            background-color: rgba(120, 200, 80, 0.3);
+            border-top: 2px solid rgba(100, 160, 60, 0.5);
+        }
+        .bunny {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            bottom: 50px; /* Position on top of the floor */
+            transform-origin: bottom center;
+        }
+        .bunny-name {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            white-space: nowrap;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            text-shadow: 0 0 3px #000, 0 0 3px #000;
+            text-align: center;
+        }
+        .streamer-bunny {
+            width: 80px;
+            height: 80px;
+        }
+        .mod-bunny {
+            width: 70px;
+            height: 70px;
+        }
+        .vip-bunny {
+            width: 65px;
+            height: 65px;
+        }
+        .bunny-hopping {
+            animation: hop 0.5s ease;
+        }
+        @keyframes hop {
+            0% { bottom: 50px; }
+            50% { bottom: 90px; }
+            100% { bottom: 50px; }
+        }
+        #config-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            z-index: 100;
+            width: 350px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+        #config-overlay h3 {
+            margin-top: 0;
+            color: #9147ff;
+        }
+        #config-overlay input, #config-overlay button {
+            margin: 8px 0;
+            padding: 10px;
+            width: 100%;
+            border: none;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        #config-overlay button {
+            background-color: #9147ff;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        #config-overlay button:hover {
+            background-color: #772ce8;
+        }
+        .hidden {
+            display: none;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .status-error {
+            background-color: rgba(255, 80, 80, 0.3);
+            border: 1px solid rgba(255, 80, 80, 0.5);
+        }
+        .status-success {
+            background-color: rgba(80, 255, 80, 0.3);
+            border: 1px solid rgba(80, 255, 80, 0.5);
+        }
+        .status-loading {
+            background-color: rgba(80, 80, 255, 0.3);
+            border: 1px solid rgba(80, 80, 255, 0.5);
+        }
+        .section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 15px;
+        }
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 8px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        .tab.active {
+            border-bottom: 2px solid #9147ff;
+            font-weight: bold;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        #token-display {
+            word-break: break-all;
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            max-height: 80px;
+            overflow-y: auto;
+        }
+        .hint {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="config-overlay">
+        <h3>Bunny Viewer Configuration</h3>
+        
+        <div class="tabs">
+            <div class="tab active" data-tab="config">Configuration</div>
+            <div class="tab" data-tab="auth">Authentication</div>
+        </div>
+        
+        <div class="tab-content active" id="config-tab">
+            <input type="text" id="channel-name" placeholder="Your Twitch Channel Name">
+            <input type="text" id="client-id" placeholder="Twitch Client ID">
+            <div class="hint">Your Client ID from the Twitch Developer Console</div>
+            <div id="token-status-display" class="status hidden"></div>
+            <button id="save-config">Save & Start</button>
+            <div id="status-message" class="status hidden"></div>
+        </div>
+        
+        <div class="tab-content" id="auth-tab">
+            <input type="text" id="auth-client-id" placeholder="Your Twitch Client ID">
+            <div class="hint">Your Client ID from the Twitch Developer Console</div>
+            <input type="text" id="redirect-uri" placeholder="Redirect URI" value="">
+            <div class="hint">Must match one of your registered redirect URIs</div>
+            <button id="auth-twitch">Authorize with Twitch</button>
+            <div id="auth-status" class="status hidden"></div>
+        </div>
+        
+        <p class="hint">Press H to toggle this panel</p>
+    </div>
+    
+    <div id="game-container">
+        <!-- <div class="floor"></div> -->
+    </div>
+
+    <script>
+        // Configuration
+        let config = {
+            channelName: '',
+            clientId: '',
+            accessToken: '',
+            maxBunnies: 30,
+            moveSpeed: 1.5,
+            hopProbability: 0.01, // Chance of hopping each frame
+            refreshInterval: 15000, // How often to refresh viewer list (15 seconds)
+            bunnyScale: {
+                viewer: { width: 60, height: 60 },
+                streamer: { width: 80, height: 80 },
+                mod: { width: 70, height: 70 },
+                vip: { width: 65, height: 65 }
+            }
+        };
+
+        // Try to load saved config
+        try {
+            const savedConfig = localStorage.getItem('bunnyViewerConfig');
+            if (savedConfig) {
+                const parsedConfig = JSON.parse(savedConfig);
+                config = {...config, ...parsedConfig};
+                document.getElementById('channel-name').value = config.channelName || '';
+                document.getElementById('client-id').value = config.clientId || '';
+                document.getElementById('auth-client-id').value = config.clientId || '';
+                
+                // Set the redirect URI to the current page by default
+                const currentUrl = window.location.href.split('#')[0]; // Remove any hash
+                document.getElementById('redirect-uri').value = currentUrl;
+                
+                // Check for access token in URL (after Twitch redirect)
+                checkForAccessToken();
+            } else {
+                // Set the redirect URI to the current page by default
+                const currentUrl = window.location.href.split('#')[0]; // Remove any hash
+                document.getElementById('redirect-uri').value = currentUrl;
+            }
+        } catch (e) {
+            console.error("Error loading config:", e);
+            // Set the redirect URI to the current page by default
+            const currentUrl = window.location.href.split('#')[0]; // Remove any hash
+            document.getElementById('redirect-uri').value = currentUrl;
+        }
+        
+        // Bunny sprites - Replace these with your actual bunny sprite URLs
+        const bunnySprites = {
+            viewer: [
+                '/api/placeholder/60/60', // Replace with actual sprite URLs
+                '/api/placeholder/60/60',
+                '/api/placeholder/60/60'
+            ],
+            streamer: '/api/placeholder/80/80',
+            mod: '/api/placeholder/70/70',
+            vip: '/api/placeholder/65/65'
+        };
+        
+        // Store active bunnies
+        const bunnies = {};
+        
+        // Store active viewers to detect who left
+        let activeViewers = new Set();
+        
+        // ID for the broadcaster (channel owner)
+        let broadcasterId = null;
+        
+        // Track connection status
+        let isConnected = false;
+        
+        // Store interval IDs for cleanup
+        let refreshInterval = null;
+        let movementInterval = null;
+        
+        // Setup tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Deactivate all tabs and content
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                // Activate clicked tab
+                tab.classList.add('active');
+                const tabName = tab.getAttribute('data-tab');
+                document.getElementById(`${tabName}-tab`).classList.add('active');
+            });
+        });
+        
+        // DOM References
+        const gameContainer = document.getElementById('game-container');
+        const configOverlay = document.getElementById('config-overlay');
+        const saveConfigBtn = document.getElementById('save-config');
+        const statusMessage = document.getElementById('status-message');
+        const authTwitchBtn = document.getElementById('auth-twitch');
+        const authStatus = document.getElementById('auth-status');
+        const tokenStatusDisplay = document.getElementById('token-status-display');
+        
+        // Check for access token in URL (from Twitch redirect)
+        function checkForAccessToken() {
+            const hash = window.location.hash;
+            if (hash) {
+                const params = new URLSearchParams(hash.substring(1)); // Remove the # character
+                const accessToken = params.get('access_token');
+                
+                if (accessToken) {
+                    // Store the token
+                    config.accessToken = accessToken;
+                    
+                    // Update the UI to show the token is set
+                    showTokenStatus('Access token received from Twitch!', 'success');
+                    
+                    // Clean the URL by removing the hash
+                    if (history.replaceState) {
+                        history.replaceState(null, null, window.location.pathname + window.location.search);
+                    } else {
+                        window.location.hash = '';
+                    }
+                    
+                    // Save the token (make sure channelName and clientId are also saved)
+                    if (config.channelName && config.clientId) {
+                        localStorage.setItem('bunnyViewerConfig', JSON.stringify({
+                            channelName: config.channelName,
+                            clientId: config.clientId,
+                            accessToken: config.accessToken
+                        }));
+                    }
+                    
+                    // Initialize the app if we have all necessary configs
+                    if (config.channelName && config.clientId) {
+                        configOverlay.classList.add('hidden');
+                        initializeApp();
+                    }
+                }
+            }
+        }
+        
+        // Authorize with Twitch using Implicit Grant Flow
+        authTwitchBtn.addEventListener('click', () => {
+            const clientId = document.getElementById('auth-client-id').value.trim();
+            const redirectUri = document.getElementById('redirect-uri').value.trim();
+            
+            if (!clientId || !redirectUri) {
+                showAuthStatus('Please enter Client ID and Redirect URI', 'error');
+                return;
+            }
+            
+            // Save the client ID to config
+            config.clientId = clientId;
+            document.getElementById('client-id').value = clientId;
+            
+            // Update the authentication status
+            showAuthStatus('Redirecting to Twitch...', 'loading');
+            
+            // Construct the Twitch authorization URL
+            const scopes = 'moderator:read:chatters';
+            const authUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}`;
+            
+            // Save current settings before redirect
+            if (document.getElementById('channel-name').value.trim()) {
+                config.channelName = document.getElementById('channel-name').value.trim();
+                localStorage.setItem('bunnyViewerConfig', JSON.stringify({
+                    channelName: config.channelName,
+                    clientId: config.clientId
+                    // access token will be added after redirect
+                }));
+            }
+            
+            // Redirect to Twitch authorization page
+            window.location.href = authUrl;
+        });
+        
+        // Save configuration
+        saveConfigBtn.addEventListener('click', () => {
+            const channelName = document.getElementById('channel-name').value.trim();
+            const clientId = document.getElementById('client-id').value.trim();
+            
+            if (!channelName || !clientId) {
+                showStatus('Please enter Channel Name and Client ID', 'error');
+                return;
+            }
+            
+            if (!config.accessToken) {
+                showStatus('Please authorize with Twitch first in the Authentication tab', 'error');
+                document.querySelector('.tab[data-tab="auth"]').click();
+                return;
+            }
+            
+            config.channelName = channelName;
+            config.clientId = clientId;
+            
+            localStorage.setItem('bunnyViewerConfig', JSON.stringify({
+                channelName: config.channelName,
+                clientId: config.clientId,
+                accessToken: config.accessToken
+            }));
+            
+            // Hide config after saving
+            configOverlay.classList.add('hidden');
+            
+            // Initialize the app
+            initializeApp();
+        });
+        
+        // Show status message in the config tab
+        function showStatus(message, type = 'success') {
+            statusMessage.textContent = message;
+            statusMessage.className = 'status';
+            statusMessage.classList.add(`status-${type}`);
+            statusMessage.classList.remove('hidden');
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                statusMessage.classList.add('hidden');
+            }, 5000);
+        }
+        
+        // Show status message in the auth tab
+        function showAuthStatus(message, type = 'success') {
+            authStatus.textContent = message;
+            authStatus.className = 'status';
+            authStatus.classList.add(`status-${type}`);
+            authStatus.classList.remove('hidden');
+            
+            if (type !== 'loading') {
+                // Auto-hide after 5 seconds
+                setTimeout(() => {
+                    authStatus.classList.add('hidden');
+                }, 5000);
+            }
+        }
+        
+        // Show token status in config tab
+        function showTokenStatus(message, type = 'success') {
+            tokenStatusDisplay.textContent = message;
+            tokenStatusDisplay.className = 'status';
+            tokenStatusDisplay.classList.add(`status-${type}`);
+            tokenStatusDisplay.classList.remove('hidden');
+        }
+        
+        // Toggle config panel with H key
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'h') {
+                configOverlay.classList.toggle('hidden');
+            }
+        });
+        
+        // Initialize the application when configuration is ready
+        function initializeApp() {
+            if (!config.channelName || !config.clientId || !config.accessToken) {
+                return; // Wait for configuration
+            }
+            
+            // Clean up any existing intervals
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (movementInterval) clearInterval(movementInterval);
+            
+            // Get broadcaster ID first
+            getBroadcasterId()
+                .then(() => {
+                    // Start fetching viewers
+                    fetchViewers();
+                    
+                    // Set up intervals for refreshing viewers and updating bunny positions
+                    refreshInterval = setInterval(fetchViewers, config.refreshInterval);
+                    movementInterval = setInterval(updateBunnies, 50);
+                    
+                    // Connect to chat for real-time interactions
+                    connectToTwitchChat();
+                })
+                .catch(error => {
+                    showStatus(`Error: ${error.message}`, 'error');
+                    console.error('Initialization error:', error);
+                    
+                    // If it's an authorization error, clear the token and ask to reauthorize
+                    if (error.message.includes('401') || error.message.includes('auth')) {
+                        config.accessToken = '';
+                        localStorage.setItem('bunnyViewerConfig', JSON.stringify({
+                            channelName: config.channelName,
+                            clientId: config.clientId,
+                            accessToken: ''
+                        }));
+                        
+                        showStatus('Authentication error. Please reauthorize with Twitch.', 'error');
+                        configOverlay.classList.remove('hidden');
+                        document.querySelector('.tab[data-tab="auth"]').click();
+                    }
+                });
+        }
+        
+        // Get the broadcaster ID (needed for API calls)
+        async function getBroadcasterId() {
+            try {
+                const response = await fetch(`https://api.twitch.tv/helix/users?login=${config.channelName}`, {
+                    headers: {
+                        'Client-ID': config.clientId,
+                        'Authorization': `Bearer ${config.accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.data && data.data.length > 0) {
+                    broadcasterId = data.data[0].id;
+                    // Also add the broadcaster as a special bunny
+                    addBunny(data.data[0].display_name || config.channelName, 'streamer', data.data[0].id);
+                } else {
+                    throw new Error('Could not find channel');
+                }
+            } catch (error) {
+                console.error('Error getting broadcaster ID:', error);
+                throw error;
+            }
+        }
+        
+        // Fetch viewers using the Twitch API
+        async function fetchViewers() {
+            if (!broadcasterId) {
+                console.error('No broadcaster ID available');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`https://api.twitch.tv/helix/chat/chatters?broadcaster_id=${broadcasterId}&moderator_id=${broadcasterId}`, {
+                    headers: {
+                        'Client-ID': config.clientId,
+                        'Authorization': `Bearer ${config.accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Track currently active viewers
+                const currentViewers = new Set();
+                
+                // Process viewers data
+                if (data.data) {
+                    data.data.forEach(viewer => {
+                        const username = viewer.user_name;
+                        const userId = viewer.user_id;
+                        currentViewers.add(username.toLowerCase());
+                        
+                        // Determine viewer type based on badges
+                        let viewerType = 'viewer';
+                        
+                        if (userId === broadcasterId) {
+                            viewerType = 'streamer';
+                        } else {
+                            // Check if moderator or VIP in a real implementation
+                            // In production, you'd get this from additional API calls
+                        }
+                        
+                        // Add or update bunny
+                        addBunny(username, viewerType, userId);
+                    });
+                    
+                    // If connection was previously unsuccessful, show success message
+                    if (!isConnected) {
+                        showStatus('Connected to Twitch successfully!');
+                        isConnected = true;
+                    }
+                }
+                
+                // Remove bunnies for viewers who left
+                removeInactiveViewers(currentViewers);
+                
+                // Update our active viewers list
+                activeViewers = currentViewers;
+                
+            } catch (error) {
+                console.error('Error fetching viewers:', error);
+                showStatus(`Error fetching viewers: ${error.message}`, 'error');
+                isConnected = false;
+                
+                // If it's an authorization error, prompt to reauthorize
+                if (error.message.includes('401')) {
+                    config.accessToken = '';
+                    localStorage.setItem('bunnyViewerConfig', JSON.stringify({
+                        channelName: config.channelName,
+                        clientId: config.clientId,
+                        accessToken: ''
+                    }));
+                    
+                    showStatus('Authentication error. Please reauthorize with Twitch.', 'error');
+                    configOverlay.classList.remove('hidden');
+                    document.querySelector('.tab[data-tab="auth"]').click();
+                }
+            }
+        }
+        
+        // Connect to Twitch chat for real-time updates (user actions, emotes, etc.)
+        function connectToTwitchChat() {
+            const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+            
+            ws.onopen = () => {
+                console.log('Connected to Twitch chat');
+                
+                // Anonymous connection for just listening
+                ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership');
+                ws.send('PASS SCHMOOPIIE');
+                ws.send('NICK justinfan' + Math.floor(Math.random() * 100000));
+                ws.send(`JOIN #${config.channelName.toLowerCase()}`);
+            };
+            
+            ws.onmessage = (event) => {
+                const message = event.data;
+                
+                // Handle PING to keep the connection alive
+                if (message.startsWith('PING')) {
+                    ws.send('PONG :tmi.twitch.tv');
+                    return;
+                }
+                
+                // Parse and process chat messages for interaction
+                handleChatMessage(message);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket Error:', error);
+            };
+            
+            ws.onclose = () => {
+                console.log('Disconnected from Twitch chat');
+                // Try to reconnect after a delay
+                setTimeout(connectToTwitchChat, 5000);
+            };
+        }
+        
+        // Handle chat messages to make bunnies interact
+        function handleChatMessage(message) {
+            // PRIVMSG format with tags
+            if (message.includes(' PRIVMSG ')) {
+                // Extract user details from tags
+                const userMatch = message.match(/:([^!]+)!/);
+                if (userMatch && userMatch[1]) {
+                    const username = userMatch[1];
+                    
+                    // If they have a bunny, make it hop when they chat
+                    if (bunnies[username.toLowerCase()]) {
+                        makeBunnyHop(username.toLowerCase());
+                    }
+                    
+                    // Check for badges to update bunny types
+                    if (message.includes('badges=')) {
+                        const badgesMatch = message.match(/badges=([^;]*)/);
+                        if (badgesMatch && badgesMatch[1]) {
+                            const badges = badgesMatch[1];
+                            
+                            // Check for broadcaster/mod/vip badges
+                            if (badges.includes('broadcaster')) {
+                                updateBunnyType(username.toLowerCase(), 'streamer');
+                            } else if (badges.includes('moderator')) {
+                                updateBunnyType(username.toLowerCase(), 'mod');
+                            } else if (badges.includes('vip')) {
+                                updateBunnyType(username.toLowerCase(), 'vip');
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Update bunny type (for moderators, VIPs, etc.)
+        function updateBunnyType(username, newType) {
+            if (bunnies[username]) {
+                // Only upgrade types, never downgrade
+                if ((newType === 'streamer' && bunnies[username].type !== 'streamer') ||
+                    (newType === 'mod' && bunnies[username].type !== 'streamer' && bunnies[username].type !== 'mod') ||
+                    (newType === 'vip' && bunnies[username].type === 'viewer')) {
+                    
+                    bunnies[username].type = newType;
+                    updateBunnyAppearance(username);
+                }
+            }
+        }
+        
+        // Remove inactive viewers
+        function removeInactiveViewers(currentViewers) {
+            Object.keys(bunnies).forEach(username => {
+                // Don't remove the streamer
+                if (bunnies[username].type === 'streamer') return;
+                
+                // If viewer is no longer in the list, remove their bunny
+                if (!currentViewers.has(username.toLowerCase())) {
+                    removeBunny(username);
+                }
+            });
+        }
+        
+        // Add a bunny for a specific viewer
+        function addBunny(username, type = 'viewer', userId = null) {
+            // Normalize username for comparison
+            const normalizedUsername = username.toLowerCase();
+            
+            // If the bunny already exists, just update its type if needed
+            if (bunnies[normalizedUsername]) {
+                // Only upgrade viewer types, never downgrade
+                if ((type === 'streamer' && bunnies[normalizedUsername].type !== 'streamer') ||
+                    (type === 'mod' && bunnies[normalizedUsername].type !== 'streamer' && bunnies[normalizedUsername].type !== 'mod') ||
+                    (type === 'vip' && bunnies[normalizedUsername].type === 'viewer')) {
+                    
+                    bunnies[normalizedUsername].type = type;
+                    updateBunnyAppearance(normalizedUsername);
+                }
+                return;
+            }
+            
+            // Limit the number of bunnies (but always show the streamer)
+            if (Object.keys(bunnies).length >= config.maxBunnies && type === 'viewer') return;
+            
+            // Create the bunny element
+            const bunnyElement = document.createElement('div');
+            bunnyElement.className = 'bunny';
+            
+            // Add specific class based on type
+            if (type === 'streamer') bunnyElement.classList.add('streamer-bunny');
+            if (type === 'mod') bunnyElement.classList.add('mod-bunny');
+            if (type === 'vip') bunnyElement.classList.add('vip-bunny');
+            
+            // Set random position along the floor
+            const containerWidth = gameContainer.offsetWidth;
+            const x = Math.random() * containerWidth;
+            
+            // Choose sprite based on type
+            let spriteUrl;
+            if (type === 'streamer') {
+                spriteUrl = bunnySprites.streamer;
+            } else if (type === 'mod') {
+                spriteUrl = bunnySprites.mod;
+            } else if (type === 'vip') {
+                spriteUrl = bunnySprites.vip;
+            } else {
+                spriteUrl = bunnySprites.viewer[Math.floor(Math.random() * bunnySprites.viewer.length)];
+            }
+            
+            bunnyElement.style.backgroundImage = `url('${spriteUrl}')`;
+            bunnyElement.style.left = `${x}px`;
+            
+            // Add name label
+            const nameElement = document.createElement('div');
+            nameElement.className = 'bunny-name';
+            nameElement.textContent = username;
+            bunnyElement.appendChild(nameElement);
+            
+            gameContainer.appendChild(bunnyElement);
+            
+            // Determine dimensions based on type
+            const bunnyWidth = config.bunnyScale[type].width;
+            const bunnyHeight = config.bunnyScale[type].height;
+            
+            // Store bunny data
+            bunnies[normalizedUsername] = {
+                element: bunnyElement,
+                x: x,
+                targetX: x + (Math.random() > 0.5 ? 1 : -1) * (100 + Math.random() * 200),
+                type: type,
+                direction: Math.random() > 0.5 ? 'right' : 'left',
+                isHopping: false,
+                lastHop: 0,
+                userId: userId,
+                width: bunnyWidth,
+                height: bunnyHeight
+            };
+            
+            // Apply size
+            bunnyElement.style.width = `${bunnyWidth}px`;
+            bunnyElement.style.height = `${bunnyHeight}px`;
+            
+            // Apply initial direction
+            updateBunnyDirection(normalizedUsername);
+        }
+        
+        // Remove a bunny
+        function removeBunny(username) {
+            const normalizedUsername = username.toLowerCase();
+            if (!bunnies[normalizedUsername]) return;
+            
+            if (bunnies[normalizedUsername].element) {
+                gameContainer.removeChild(bunnies[normalizedUsername].element);
+            }
+            
+            delete bunnies[normalizedUsername];
+        }
+        
+        // Make a bunny hop
+        function makeBunnyHop(username) {
+            const normalizedUsername = username.toLowerCase();
+            if (!bunnies[normalizedUsername] || bunnies[normalizedUsername].isHopping) return;
+            
+            const bunny = bunnies[normalizedUsername];
+            const now = Date.now();
+            
+            // Don't allow hopping too frequently
+            // Don't allow hopping too frequently
+            if (now - bunny.lastHop < 2000) return;
+            
+            bunny.isHopping = true;
+            bunny.lastHop = now;
+            
+            bunny.element.classList.add('bunny-hopping');
+            
+            // Reset after animation completes
+            setTimeout(() => {
+                if (bunnies[normalizedUsername]) {
+                    bunnies[normalizedUsername].isHopping = false;
+                    bunnies[normalizedUsername].element.classList.remove('bunny-hopping');
+                }
+            }, 500);
+        }
+        
+        // Update bunny direction (flipping sprite without flipping name)
+        function updateBunnyDirection(username) {
+            const normalizedUsername = username.toLowerCase();
+            if (!bunnies[normalizedUsername]) return;
+            
+            const bunny = bunnies[normalizedUsername];
+            
+            // Apply the direction to the bunny element
+            if (bunny.direction === 'left') {
+                bunny.element.style.transform = 'scaleX(-1)';
+                // Make sure name doesn't flip
+                const nameElement = bunny.element.querySelector('.bunny-name');
+                if (nameElement) {
+                    nameElement.style.transform = 'translateX(-50%) scaleX(-1)';
+                }
+            } else {
+                bunny.element.style.transform = 'scaleX(1)';
+                // Reset name transform
+                const nameElement = bunny.element.querySelector('.bunny-name');
+                if (nameElement) {
+                    nameElement.style.transform = 'translateX(-50%)';
+                }
+            }
+        }
+        
+        // Update bunny appearance based on type
+        function updateBunnyAppearance(username) {
+            const normalizedUsername = username.toLowerCase();
+            if (!bunnies[normalizedUsername]) return;
+            
+            const bunny = bunnies[normalizedUsername];
+            const type = bunny.type;
+            
+            // Update class
+            bunny.element.classList.remove('streamer-bunny', 'mod-bunny', 'vip-bunny');
+            if (type === 'streamer') bunny.element.classList.add('streamer-bunny');
+            if (type === 'mod') bunny.element.classList.add('mod-bunny');
+            if (type === 'vip') bunny.element.classList.add('vip-bunny');
+            
+            // Update sprite
+            let spriteUrl;
+            if (type === 'streamer') {
+                spriteUrl = bunnySprites.streamer;
+            } else if (type === 'mod') {
+                spriteUrl = bunnySprites.mod;
+            } else if (type === 'vip') {
+                spriteUrl = bunnySprites.vip;
+            } else {
+                spriteUrl = bunnySprites.viewer[Math.floor(Math.random() * bunnySprites.viewer.length)];
+            }
+            
+            bunny.element.style.backgroundImage = `url('${spriteUrl}')`;
+            
+            // Update size
+            bunny.width = config.bunnyScale[type].width;
+            bunny.height = config.bunnyScale[type].height;
+            bunny.element.style.width = `${bunny.width}px`;
+            bunny.element.style.height = `${bunny.height}px`;
+        }
+        
+        // Update all bunny positions
+        function updateBunnies() {
+            const containerWidth = gameContainer.offsetWidth;
+            
+            Object.keys(bunnies).forEach(username => {
+                const bunny = bunnies[username];
+                
+                // Skip if currently hopping
+                if (bunny.isHopping) return;
+                
+                // Check if bunny needs a new target
+                const distanceToTarget = Math.abs(bunny.targetX - bunny.x);
+                if (distanceToTarget < 5) {
+                    // Set new target
+                    bunny.targetX = Math.random() * containerWidth;
+                    
+                    // Update direction
+                    if (bunny.targetX > bunny.x) {
+                        bunny.direction = 'right';
+                    } else {
+                        bunny.direction = 'left';
+                    }
+                    
+                    // Update visuals for direction
+                    updateBunnyDirection(username);
+                    
+                    // Add a pause between movements (looks more natural)
+                    bunny.pauseMovement = true;
+                    setTimeout(() => {
+                        if (bunnies[username]) bunnies[username].pauseMovement = false;
+                    }, 500 + Math.random() * 1000);
+                }
+                
+                // Move toward target if not paused
+                if (!bunny.pauseMovement) {
+                    const dx = bunny.targetX - bunny.x;
+                    const direction = dx > 0 ? 1 : -1;
+                    bunny.x += direction * config.moveSpeed;
+                    
+                    // Apply position
+                    bunny.element.style.left = `${bunny.x}px`;
+                    
+                    // Random hopping
+                    if (!bunny.isHopping && Math.random() < config.hopProbability) {
+                        makeBunnyHop(username);
+                    }
+                }
+            });
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const containerWidth = gameContainer.offsetWidth;
+            
+            // Keep bunnies within bounds
+            Object.keys(bunnies).forEach(username => {
+                const bunny = bunnies[username];
+                if (bunny.x > containerWidth - bunny.width) {
+                    bunny.x = containerWidth - bunny.width;
+                    bunny.element.style.left = `${bunny.x}px`;
+                }
+            });
+        });
+        
+        // Initialize if we already have configuration
+        if (config.channelName && config.clientId && config.accessToken) {
+            configOverlay.classList.add('hidden');
+            initializeApp();
+        }
+    </script>
+</body>
+</html>
