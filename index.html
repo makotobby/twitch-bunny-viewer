@@ -245,16 +245,30 @@
             document.getElementById('redirect-uri').value = currentUrl;
         }
         
-        // Bunny sprites - Replace these with your actual bunny sprite URLs
+        // Bunny sprites - Using actual sprites from the Sprites folder
+        const bunnyTypes = [
+            'BlackWhite', 'Brown2Color', 'BrownWhite', 'BunnyBlack', 
+            'BunnyBrown', 'DemonicBunny', 'FantasyBunny', 'GreyBunny', 
+            'LightBrown', 'WhiteBunny'
+        ];
+
         const bunnySprites = {
-            viewer: [
-                '/api/placeholder/60/60', // Replace with actual sprite URLs
-                '/api/placeholder/60/60',
-                '/api/placeholder/60/60'
-            ],
-            streamer: '/api/placeholder/80/80',
-            mod: '/api/placeholder/70/70',
-            vip: '/api/placeholder/65/65'
+            viewer: {
+                idle: bunnyTypes.map(type => `Sprites/${type}/Idle.png`),
+                running: bunnyTypes.map(type => `Sprites/${type}/Running.png`)
+            },
+            streamer: {
+                idle: 'Sprites/DemonicBunny/Idle.png',
+                running: 'Sprites/DemonicBunny/Running.png'
+            },
+            mod: {
+                idle: 'Sprites/FantasyBunny/Idle.png',
+                running: 'Sprites/FantasyBunny/Running.png'
+            },
+            vip: {
+                idle: 'Sprites/WhiteBunny/Idle.png',
+                running: 'Sprites/WhiteBunny/Running.png'
+            }
         };
         
         // Store active bunnies
@@ -353,7 +367,7 @@
             showAuthStatus('Redirecting to Twitch...', 'loading');
             
             // Construct the Twitch authorization URL
-            const scopes = 'moderator:read:chatters';
+            const scopes = 'moderator:read:chatters channel:read:vips moderation:read';
             const authUrl = `https://id.twitch.tv/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes)}`;
             
             // Save current settings before redirect
@@ -729,19 +743,27 @@
             const containerWidth = gameContainer.offsetWidth;
             const x = Math.random() * containerWidth;
             
+            // Determine random sprite variant for viewer
+            const spriteVariant = Math.floor(Math.random() * bunnySprites.viewer.idle.length);
+            
             // Choose sprite based on type
-            let spriteUrl;
+            let idleSprite, runningSprite;
             if (type === 'streamer') {
-                spriteUrl = bunnySprites.streamer;
+                idleSprite = bunnySprites.streamer.idle;
+                runningSprite = bunnySprites.streamer.running;
             } else if (type === 'mod') {
-                spriteUrl = bunnySprites.mod;
+                idleSprite = bunnySprites.mod.idle;
+                runningSprite = bunnySprites.mod.running;
             } else if (type === 'vip') {
-                spriteUrl = bunnySprites.vip;
+                idleSprite = bunnySprites.vip.idle;
+                runningSprite = bunnySprites.vip.running;
             } else {
-                spriteUrl = bunnySprites.viewer[Math.floor(Math.random() * bunnySprites.viewer.length)];
+                idleSprite = bunnySprites.viewer.idle[spriteVariant];
+                runningSprite = bunnySprites.viewer.running[spriteVariant];
             }
             
-            bunnyElement.style.backgroundImage = `url('${spriteUrl}')`;
+            // Initially use idle sprite
+            bunnyElement.style.backgroundImage = `url('${idleSprite}')`;
             bunnyElement.style.left = `${x}px`;
             
             // Add name label
@@ -767,7 +789,13 @@
                 lastHop: 0,
                 userId: userId,
                 width: bunnyWidth,
-                height: bunnyHeight
+                height: bunnyHeight,
+                isMoving: false,
+                spriteVariant: spriteVariant,
+                sprites: {
+                    idle: idleSprite,
+                    running: runningSprite
+                }
             };
             
             // Apply size
@@ -799,12 +827,16 @@
             const now = Date.now();
             
             // Don't allow hopping too frequently
-            // Don't allow hopping too frequently
             if (now - bunny.lastHop < 2000) return;
             
             bunny.isHopping = true;
             bunny.lastHop = now;
             
+            // Store previous sprite state
+            const wasMoving = bunny.isMoving;
+            
+            // Switch to idle sprite for hopping
+            bunny.element.style.backgroundImage = `url('${bunny.sprites.idle}')`;
             bunny.element.classList.add('bunny-hopping');
             
             // Reset after animation completes
@@ -812,6 +844,12 @@
                 if (bunnies[normalizedUsername]) {
                     bunnies[normalizedUsername].isHopping = false;
                     bunnies[normalizedUsername].element.classList.remove('bunny-hopping');
+                    
+                    // Restore sprite state
+                    if (wasMoving && !bunnies[normalizedUsername].pauseMovement) {
+                        bunnies[normalizedUsername].isMoving = true;
+                        bunnies[normalizedUsername].element.style.backgroundImage = `url('${bunnies[normalizedUsername].sprites.running}')`;
+                    }
                 }
             }, 500);
         }
@@ -855,19 +893,38 @@
             if (type === 'mod') bunny.element.classList.add('mod-bunny');
             if (type === 'vip') bunny.element.classList.add('vip-bunny');
             
-            // Update sprite
-            let spriteUrl;
+            // Update sprites based on type
+            let idleSprite, runningSprite;
+            
             if (type === 'streamer') {
-                spriteUrl = bunnySprites.streamer;
+                idleSprite = bunnySprites.streamer.idle;
+                runningSprite = bunnySprites.streamer.running;
             } else if (type === 'mod') {
-                spriteUrl = bunnySprites.mod;
+                idleSprite = bunnySprites.mod.idle;
+                runningSprite = bunnySprites.mod.running;
             } else if (type === 'vip') {
-                spriteUrl = bunnySprites.vip;
+                idleSprite = bunnySprites.vip.idle;
+                runningSprite = bunnySprites.vip.running;
             } else {
-                spriteUrl = bunnySprites.viewer[Math.floor(Math.random() * bunnySprites.viewer.length)];
+                // Keep the same sprite variant or assign a new one if needed
+                const spriteVariant = bunny.spriteVariant !== undefined ? 
+                    bunny.spriteVariant : 
+                    Math.floor(Math.random() * bunnySprites.viewer.idle.length);
+                    
+                bunny.spriteVariant = spriteVariant;
+                idleSprite = bunnySprites.viewer.idle[spriteVariant];
+                runningSprite = bunnySprites.viewer.running[spriteVariant];
             }
             
-            bunny.element.style.backgroundImage = `url('${spriteUrl}')`;
+            // Store the sprite references
+            bunny.sprites = {
+                idle: idleSprite,
+                running: runningSprite
+            };
+            
+            // Update current sprite based on movement state
+            const currentSprite = bunny.isMoving ? bunny.sprites.running : bunny.sprites.idle;
+            bunny.element.style.backgroundImage = `url('${currentSprite}')`;
             
             // Update size
             bunny.width = config.bunnyScale[type].width;
@@ -904,8 +961,15 @@
                     
                     // Add a pause between movements (looks more natural)
                     bunny.pauseMovement = true;
+                    bunny.isMoving = false;
+                    
+                    // Update sprite to idle
+                    bunny.element.style.backgroundImage = `url('${bunny.sprites.idle}')`;
+                    
                     setTimeout(() => {
-                        if (bunnies[username]) bunnies[username].pauseMovement = false;
+                        if (bunnies[username]) {
+                            bunnies[username].pauseMovement = false;
+                        }
                     }, 500 + Math.random() * 1000);
                 }
                 
@@ -917,6 +981,12 @@
                     
                     // Apply position
                     bunny.element.style.left = `${bunny.x}px`;
+                    
+                    // Set moving state and update sprite if needed
+                    if (!bunny.isMoving) {
+                        bunny.isMoving = true;
+                        bunny.element.style.backgroundImage = `url('${bunny.sprites.running}')`;
+                    }
                     
                     // Random hopping
                     if (!bunny.isHopping && Math.random() < config.hopProbability) {
