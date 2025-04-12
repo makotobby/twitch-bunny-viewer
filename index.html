@@ -22,18 +22,18 @@
             bottom: 0;
             left: 0;
             width: 100%;
-            height: 50px;
-            background-color: rgba(120, 200, 80, 0.3);
-            border-top: 2px solid rgba(100, 160, 60, 0.5);
+            /* border-top: 2px solid rgba(100, 160, 60, 0.5); */
         }
         .bunny {
             position: absolute;
             width: 60px;
             height: 60px;
-            background-size: contain;
             background-repeat: no-repeat;
-            bottom: 50px; /* Position on top of the floor */
+            background-size: contain;
+            background-position: center bottom;
+            bottom: 0;
             transform-origin: bottom center;
+            image-rendering: pixelated;
         }
         .bunny-name {
             position: absolute;
@@ -47,25 +47,25 @@
             text-shadow: 0 0 3px #000, 0 0 3px #000;
             text-align: center;
         }
-        .streamer-bunny {
-            width: 80px;
-            height: 80px;
-        }
-        .mod-bunny {
-            width: 70px;
-            height: 70px;
-        }
-        .vip-bunny {
-            width: 65px;
-            height: 65px;
+        .streamer-bunny, .mod-bunny, .vip-bunny {
+            width: 60px;
+            height: 60px;
         }
         .bunny-hopping {
-            animation: hop 0.5s ease;
+            animation: hop 0.5s ease-out forwards !important;
         }
         @keyframes hop {
-            0% { bottom: 50px; }
-            50% { bottom: 90px; }
-            100% { bottom: 50px; }
+            0% { transform: translateY(0) scaleY(1); }
+            50% { transform: translateY(-30px) scaleY(1.1); }
+            100% { transform: translateY(0) scaleY(1); }
+        }
+        .bunny[style*="scaleX(-1)"].bunny-hopping {
+            animation: hop-left 0.5s ease-out forwards !important;
+        }
+        @keyframes hop-left {
+            0% { transform: translateY(0) scaleX(-1) scaleY(1); }
+            50% { transform: translateY(-30px) scaleX(-1) scaleY(1.1); }
+            100% { transform: translateY(0) scaleX(-1) scaleY(1); }
         }
         #config-overlay {
             position: absolute;
@@ -196,7 +196,7 @@
     </div>
     
     <div id="game-container">
-        <!-- <div class="floor"></div> -->
+        <div class="floor"></div>
     </div>
 
     <script>
@@ -211,9 +211,9 @@
             refreshInterval: 15000, // How often to refresh viewer list (15 seconds)
             bunnyScale: {
                 viewer: { width: 60, height: 60 },
-                streamer: { width: 80, height: 80 },
-                mod: { width: 70, height: 70 },
-                vip: { width: 65, height: 65 }
+                streamer: { width: 60, height: 60 }, // Changed from 80x80
+                mod: { width: 60, height: 60 },      // Changed from 70x70
+                vip: { width: 60, height: 60 }       // Changed from 65x65
             }
         };
 
@@ -252,22 +252,23 @@
             'LightBrown', 'WhiteBunny'
         ];
 
+        // Update your bunnySprites object to use .gif instead of .png
         const bunnySprites = {
             viewer: {
-                idle: bunnyTypes.map(type => `Sprites/${type}/Idle.png`),
-                running: bunnyTypes.map(type => `Sprites/${type}/Running.png`)
+                idle: bunnyTypes.map(type => `Sprites/${type}/Idle.gif`),
+                running: bunnyTypes.map(type => `Sprites/${type}/Running.gif`)
             },
             streamer: {
-                idle: 'Sprites/DemonicBunny/Idle.png',
-                running: 'Sprites/DemonicBunny/Running.png'
+                idle: 'Sprites/FantasyBunny/Idle.gif',
+                running: 'Sprites/FantasyBunny/Running.gif'
             },
             mod: {
-                idle: 'Sprites/FantasyBunny/Idle.png',
-                running: 'Sprites/FantasyBunny/Running.png'
+                idle: 'Sprites/Brown2Color/Idle.gif',
+                running: 'Sprites/Brown2Color/Running.gif'
             },
             vip: {
-                idle: 'Sprites/WhiteBunny/Idle.png',
-                running: 'Sprites/WhiteBunny/Running.png'
+                idle: 'Sprites/WhiteBunny/Idle.gif',
+                running: 'Sprites/WhiteBunny/Running.gif'
             }
         };
         
@@ -539,7 +540,7 @@
             }
             
             try {
-                const response = await fetch(`https://api.twitch.tv/helix/chat/chatters?broadcaster_id=${broadcasterId}&moderator_id=${broadcasterId}`, {
+                const response = await fetch(`https://api.twitch.tv/helix/chat/chatters?broadcaster_id=${broadcasterId}`, {
                     headers: {
                         'Client-ID': config.clientId,
                         'Authorization': `Bearer ${config.accessToken}`
@@ -709,7 +710,7 @@
             });
         }
         
-        // Add a bunny for a specific viewer
+        // Update the addBunny function to ensure initial direction is correct
         function addBunny(username, type = 'viewer', userId = null) {
             // Normalize username for comparison
             const normalizedUsername = username.toLowerCase();
@@ -762,9 +763,8 @@
                 runningSprite = bunnySprites.viewer.running[spriteVariant];
             }
             
-            // Initially use idle sprite
+            // Initially use idle sprite with animation
             bunnyElement.style.backgroundImage = `url('${idleSprite}')`;
-            bunnyElement.style.left = `${x}px`;
             
             // Add name label
             const nameElement = document.createElement('div');
@@ -778,13 +778,16 @@
             const bunnyWidth = config.bunnyScale[type].width;
             const bunnyHeight = config.bunnyScale[type].height;
             
+            // Choose random initial direction
+            const initialDirection = Math.random() > 0.5 ? 'right' : 'left';
+            
             // Store bunny data
             bunnies[normalizedUsername] = {
                 element: bunnyElement,
                 x: x,
-                targetX: x + (Math.random() > 0.5 ? 1 : -1) * (100 + Math.random() * 200),
+                targetX: x + (initialDirection === 'right' ? 1 : -1) * (100 + Math.random() * 200), // Match target with direction
                 type: type,
-                direction: Math.random() > 0.5 ? 'right' : 'left',
+                direction: initialDirection,
                 isHopping: false,
                 lastHop: 0,
                 userId: userId,
@@ -795,7 +798,8 @@
                 sprites: {
                     idle: idleSprite,
                     running: runningSprite
-                }
+                },
+                animationState: 'idle'  // Track current animation
             };
             
             // Apply size
@@ -818,7 +822,7 @@
             delete bunnies[normalizedUsername];
         }
         
-        // Make a bunny hop
+        // Update the makeBunnyHop function to properly handle animations
         function makeBunnyHop(username) {
             const normalizedUsername = username.toLowerCase();
             if (!bunnies[normalizedUsername] || bunnies[normalizedUsername].isHopping) return;
@@ -832,11 +836,10 @@
             bunny.isHopping = true;
             bunny.lastHop = now;
             
-            // Store previous sprite state
+            // Store previous movement state
             const wasMoving = bunny.isMoving;
             
-            // Switch to idle sprite for hopping
-            bunny.element.style.backgroundImage = `url('${bunny.sprites.idle}')`;
+            // Add hopping class for animation
             bunny.element.classList.add('bunny-hopping');
             
             // Reset after animation completes
@@ -845,16 +848,18 @@
                     bunnies[normalizedUsername].isHopping = false;
                     bunnies[normalizedUsername].element.classList.remove('bunny-hopping');
                     
-                    // Restore sprite state
+                    // Restore animation state
                     if (wasMoving && !bunnies[normalizedUsername].pauseMovement) {
                         bunnies[normalizedUsername].isMoving = true;
-                        bunnies[normalizedUsername].element.style.backgroundImage = `url('${bunnies[normalizedUsername].sprites.running}')`;
+                        updateBunnyAnimation(normalizedUsername, 'running');
+                    } else {
+                        updateBunnyAnimation(normalizedUsername, 'idle');
                     }
                 }
             }, 500);
         }
         
-        // Update bunny direction (flipping sprite without flipping name)
+        // Update the updateBunnyDirection function to ensure consistent movement
         function updateBunnyDirection(username) {
             const normalizedUsername = username.toLowerCase();
             if (!bunnies[normalizedUsername]) return;
@@ -869,6 +874,13 @@
                 if (nameElement) {
                     nameElement.style.transform = 'translateX(-50%) scaleX(-1)';
                 }
+                
+                // Ensure target is to the left of current position
+                if (bunny.targetX > bunny.x) {
+                    bunny.targetX = bunny.x - (100 + Math.random() * 200);
+                    // Keep within bounds
+                    if (bunny.targetX < 0) bunny.targetX = 0;
+                }
             } else {
                 bunny.element.style.transform = 'scaleX(1)';
                 // Reset name transform
@@ -876,61 +888,32 @@
                 if (nameElement) {
                     nameElement.style.transform = 'translateX(-50%)';
                 }
+                
+                // Ensure target is to the right of current position
+                if (bunny.targetX < bunny.x) {
+                    const containerWidth = gameContainer.offsetWidth;
+                    bunny.targetX = bunny.x + (100 + Math.random() * 200);
+                    // Keep within bounds
+                    if (bunny.targetX > containerWidth - bunny.width) bunny.targetX = containerWidth - bunny.width;
+                }
             }
         }
         
-        // Update bunny appearance based on type
-        function updateBunnyAppearance(username) {
+        // Update bunny animation state (simplified for GIFs)
+        function updateBunnyAnimation(username, state) {
             const normalizedUsername = username.toLowerCase();
             if (!bunnies[normalizedUsername]) return;
             
             const bunny = bunnies[normalizedUsername];
-            const type = bunny.type;
             
-            // Update class
-            bunny.element.classList.remove('streamer-bunny', 'mod-bunny', 'vip-bunny');
-            if (type === 'streamer') bunny.element.classList.add('streamer-bunny');
-            if (type === 'mod') bunny.element.classList.add('mod-bunny');
-            if (type === 'vip') bunny.element.classList.add('vip-bunny');
+            // Skip if animation state hasn't changed
+            if (bunny.animationState === state) return;
             
-            // Update sprites based on type
-            let idleSprite, runningSprite;
+            // Update animation state
+            bunny.animationState = state;
             
-            if (type === 'streamer') {
-                idleSprite = bunnySprites.streamer.idle;
-                runningSprite = bunnySprites.streamer.running;
-            } else if (type === 'mod') {
-                idleSprite = bunnySprites.mod.idle;
-                runningSprite = bunnySprites.mod.running;
-            } else if (type === 'vip') {
-                idleSprite = bunnySprites.vip.idle;
-                runningSprite = bunnySprites.vip.running;
-            } else {
-                // Keep the same sprite variant or assign a new one if needed
-                const spriteVariant = bunny.spriteVariant !== undefined ? 
-                    bunny.spriteVariant : 
-                    Math.floor(Math.random() * bunnySprites.viewer.idle.length);
-                    
-                bunny.spriteVariant = spriteVariant;
-                idleSprite = bunnySprites.viewer.idle[spriteVariant];
-                runningSprite = bunnySprites.viewer.running[spriteVariant];
-            }
-            
-            // Store the sprite references
-            bunny.sprites = {
-                idle: idleSprite,
-                running: runningSprite
-            };
-            
-            // Update current sprite based on movement state
-            const currentSprite = bunny.isMoving ? bunny.sprites.running : bunny.sprites.idle;
-            bunny.element.style.backgroundImage = `url('${currentSprite}')`;
-            
-            // Update size
-            bunny.width = config.bunnyScale[type].width;
-            bunny.height = config.bunnyScale[type].height;
-            bunny.element.style.width = `${bunny.width}px`;
-            bunny.element.style.height = `${bunny.height}px`;
+            // Set the correct GIF - no need for CSS animation classes
+            bunny.element.style.backgroundImage = `url('${bunny.sprites[state]}')`;
         }
         
         // Update all bunny positions
@@ -946,25 +929,35 @@
                 // Check if bunny needs a new target
                 const distanceToTarget = Math.abs(bunny.targetX - bunny.x);
                 if (distanceToTarget < 5) {
-                    // Set new target
-                    bunny.targetX = Math.random() * containerWidth;
+                    // Set new target in the same direction first
+                    const direction = bunny.direction === 'right' ? 1 : -1;
+                    let newTargetX = bunny.x + direction * (100 + Math.random() * 200);
                     
-                    // Update direction
-                    if (bunny.targetX > bunny.x) {
-                        bunny.direction = 'right';
-                    } else {
-                        bunny.direction = 'left';
+                    // If going off screen, change direction
+                    if (newTargetX < 0 || newTargetX > containerWidth - bunny.width) {
+                        bunny.direction = bunny.direction === 'right' ? 'left' : 'right';
+                        newTargetX = bunny.x + (bunny.direction === 'right' ? 1 : -1) * (100 + Math.random() * 200);
                     }
+                    
+                    // Randomly change direction sometimes
+                    if (Math.random() < 0.3) {
+                        bunny.direction = bunny.direction === 'right' ? 'left' : 'right';
+                        newTargetX = bunny.x + (bunny.direction === 'right' ? 1 : -1) * (100 + Math.random() * 200);
+                    }
+                    
+                    // Keep within bounds
+                    newTargetX = Math.max(0, Math.min(containerWidth - bunny.width, newTargetX));
+                    bunny.targetX = newTargetX;
                     
                     // Update visuals for direction
                     updateBunnyDirection(username);
                     
                     // Add a pause between movements (looks more natural)
                     bunny.pauseMovement = true;
-                    bunny.isMoving = false;
                     
-                    // Update sprite to idle
-                    bunny.element.style.backgroundImage = `url('${bunny.sprites.idle}')`;
+                    // Switch to idle animation
+                    bunny.isMoving = false;
+                    updateBunnyAnimation(username, 'idle');
                     
                     setTimeout(() => {
                         if (bunnies[username]) {
@@ -979,13 +972,16 @@
                     const direction = dx > 0 ? 1 : -1;
                     bunny.x += direction * config.moveSpeed;
                     
+                    // Ensure bunny stays within container bounds
+                    bunny.x = Math.max(0, Math.min(containerWidth - bunny.width, bunny.x));
+                    
                     // Apply position
                     bunny.element.style.left = `${bunny.x}px`;
                     
-                    // Set moving state and update sprite if needed
+                    // Set moving state and switch to running animation if not already running
                     if (!bunny.isMoving) {
                         bunny.isMoving = true;
-                        bunny.element.style.backgroundImage = `url('${bunny.sprites.running}')`;
+                        updateBunnyAnimation(username, 'running');
                     }
                     
                     // Random hopping
@@ -1015,6 +1011,87 @@
             configOverlay.classList.add('hidden');
             initializeApp();
         }
+
+        // Test function to generate bunnies without Twitch connection
+        function testBunnies() {
+            // Clear any existing bunnies
+            Object.keys(bunnies).forEach(username => {
+                removeBunny(username);
+            });
+            
+            // Add test bunnies with different roles
+            const testUsers = [
+                { username: 'TestStreamer', type: 'streamer' },
+                { username: 'TestModerator', type: 'mod' },
+                { username: 'TestVIP', type: 'vip' },
+                { username: 'TestViewer1', type: 'viewer' },
+                { username: 'TestViewer2', type: 'viewer' },
+                { username: 'TestViewer3', type: 'viewer' }
+            ];
+            
+            // Add test bunnies
+            testUsers.forEach(user => {
+                addBunny(user.username, user.type);
+            });
+            
+            // Start bunny movement
+            if (movementInterval) clearInterval(movementInterval);
+            movementInterval = setInterval(updateBunnies, 50);
+            
+            // Add a test button to make bunnies hop
+            const testHopButton = document.createElement('button');
+            testHopButton.textContent = 'Make Bunnies Hop';
+            testHopButton.style.position = 'absolute';
+            testHopButton.style.top = '10px';
+            testHopButton.style.right = '10px';
+            testHopButton.style.zIndex = '1000';
+            testHopButton.style.backgroundColor = '#9147ff';
+            testHopButton.style.color = 'white';
+            testHopButton.style.padding = '10px';
+            testHopButton.style.border = 'none';
+            testHopButton.style.borderRadius = '4px';
+            testHopButton.style.cursor = 'pointer';
+            
+            testHopButton.addEventListener('click', () => {
+                Object.keys(bunnies).forEach(username => {
+                    makeBunnyHop(username);
+                });
+            });
+            
+            gameContainer.appendChild(testHopButton);
+            
+            // Make floor visible if it's not already
+            let floor = document.querySelector('.floor');
+            if (!floor) {
+                floor = document.createElement('div');
+                floor.className = 'floor';
+                gameContainer.appendChild(floor);
+            }
+        }
+
+        // Add a test button in the config panel
+        const testSection = document.createElement('div');
+        testSection.className = 'section';
+        testSection.innerHTML = `
+            <h3>Testing</h3>
+            <p>Test the bunny animations without connecting to Twitch:</p>
+            <button id="test-bunnies-btn">Generate Test Bunnies</button>
+        `;
+
+        configOverlay.appendChild(testSection);
+
+        // Add event listener for the test button
+        document.getElementById('test-bunnies-btn').addEventListener('click', () => {
+            testBunnies();
+            configOverlay.classList.add('hidden');
+        });
+
+        // Update the config panel toggle to show it after hiding
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'h') {
+                configOverlay.classList.toggle('hidden');
+            }
+        });
     </script>
 </body>
 </html>
