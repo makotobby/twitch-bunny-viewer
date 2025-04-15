@@ -532,7 +532,7 @@
             }
         }
         
-        // Fix the fetchViewers function to include moderator_id
+        // Update fetchViewers to support a moderator account that isn't the broadcaster
         async function fetchViewers() {
             if (!broadcasterId) {
                 console.error('No broadcaster ID available');
@@ -540,9 +540,48 @@
             }
             
             try {
-                // Use broadcaster as moderator since we need both parameters
-                const moderatorId = broadcasterId; // The broadcaster is also a moderator of their own channel
+                // Get user ID of the authorized user (the moderator)
+                if (!config.userId) {
+                    // First, get the authorized user's ID
+                    const userResponse = await fetch('https://api.twitch.tv/helix/users', {
+                        headers: {
+                            'Client-ID': config.clientId,
+                            'Authorization': `Bearer ${config.accessToken}`
+                        }
+                    });
+                    
+                    if (!userResponse.ok) {
+                        throw new Error(`API Error: ${userResponse.status}`);
+                    }
+                    
+                    const userData = await userResponse.json();
+                    if (userData.data && userData.data.length > 0) {
+                        config.userId = userData.data[0].id;
+                        config.userLogin = userData.data[0].login;
+                        
+                        // Save to localStorage
+                        localStorage.setItem('bunnyViewerConfig', JSON.stringify({
+                            channelName: config.channelName,
+                            clientId: config.clientId,
+                            accessToken: config.accessToken,
+                            userId: config.userId,
+                            userLogin: config.userLogin
+                        }));
+                        
+                        // Add the logged-in moderator as a bunny too if they're not the broadcaster
+                        if (config.userId !== broadcasterId) {
+                            addBunny(userData.data[0].display_name, 'mod', config.userId);
+                        }
+                    } else {
+                        throw new Error('Could not get user information');
+                    }
+                }
                 
+                // Check if user has moderator permission for the channel
+                // Use this user's ID as the moderator_id
+                const moderatorId = config.userId;
+                
+                // Fetch the viewers
                 const response = await fetch(`https://api.twitch.tv/helix/chat/chatters?broadcaster_id=${broadcasterId}&moderator_id=${moderatorId}`, {
                     headers: {
                         'Client-ID': config.clientId,
@@ -557,8 +596,6 @@
                 }
                 
                 const data = await response.json();
-                
-                // Track currently active viewers
                 const currentViewers = new Set();
                 
                 // Process viewers data
@@ -573,9 +610,8 @@
                         
                         if (userId === broadcasterId) {
                             viewerType = 'streamer';
-                        } else {
-                            // Check if moderator or VIP in a real implementation
-                            // In production, you'd get this from additional API calls
+                        } else if (userId === config.userId) {
+                            viewerType = 'mod'; // The logged-in moderator
                         }
                         
                         // Add or update bunny
@@ -588,6 +624,10 @@
                         isConnected = true;
                     }
                 }
+                
+                // Check for VIPs and moderators separately
+                await fetchVIPs(currentViewers);
+                await fetchModerators(currentViewers);
                 
                 // Remove bunnies for viewers who left
                 removeInactiveViewers(currentViewers);
@@ -613,6 +653,71 @@
                     configOverlay.classList.remove('hidden');
                     document.querySelector('.tab[data-tab="auth"]').click();
                 }
+            }
+        }
+
+        // Add these helper functions to fetch moderators and VIPs
+
+        async function fetchModerators(currentViewers) {
+            try {
+                const response = await fetch(`https://api.twitch.tv/helix/moderation/moderators?broadcaster_id=${broadcasterId}`, {
+                    headers: {
+                        'Client-ID': config.clientId,
+                        'Authorization': `Bearer ${config.accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    console.error('Error fetching moderators:', response.status);
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.data) {
+                    data.data.forEach(mod => {
+                        const username = mod.user_name;
+                        const userId = mod.user_id;
+                        
+                        // Skip if this is the broadcaster (who is also a mod)
+                        if (userId === broadcasterId) return;
+                        
+                        // Update the bunny to mod type
+                        updateBunnyType(username.toLowerCase(), 'mod');
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching moderators:', error);
+            }
+        }
+
+        async function fetchVIPs(currentViewers) {
+            try {
+                const response = await fetch(`https://api.twitch.tv/helix/channels/vips?broadcaster_id=${broadcasterId}`, {
+                    headers: {
+                        'Client-ID': config.clientId,
+                        'Authorization': `Bearer ${config.accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    console.error('Error fetching VIPs:', response.status);
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.data) {
+                    data.data.forEach(vip => {
+                        const username = vip.user_name;
+                        const userId = vip.user_id;
+                        
+                        // Update the bunny to VIP type
+                        updateBunnyType(username.toLowerCase(), 'vip');
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching VIPs:', error);
             }
         }
         

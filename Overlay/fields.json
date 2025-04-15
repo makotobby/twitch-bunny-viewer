@@ -1,0 +1,54 @@
+{
+    "channelName": {
+      "type": "text",
+      "label": "Your Twitch Channel Name",
+      "value": ""
+    },
+    "clientId": {
+      "type": "text",
+      "label": "Twitch Client ID",
+      "value": ""
+    },
+    "accessToken": {
+      "type": "text",
+      "label": "Twitch Access Token",
+      "value": ""
+    },
+    "maxBunnies": {
+      "type": "number",
+      "label": "Maximum Number of Bunnies",
+      "value": 30
+    },
+    "moveSpeed": {
+      "type": "slider",
+      "label": "Bunny Movement Speed",
+      "min": 0.5,
+      "max": 3,
+      "step": 0.1,
+      "value": 1.5
+    },
+    "hopProbability": {
+      "type": "slider",
+      "label": "Random Hop Frequency",
+      "min": 0.001,
+      "max": 0.05,
+      "step": 0.001,
+      "value": 0.01
+    },
+    "refreshInterval": {
+      "type": "number",
+      "label": "Refresh Interval (ms)",
+      "value": 15000
+    },
+    "followersOnly": {
+      "type": "boolean",
+      "label": "Followers Only Mode",
+      "value": false
+    },
+    "bunnyScale": {
+        "viewer": { "width": 60, "height": 60 },
+        "streamer": { "width": 60, "height": 60 },
+        "mod": { "width": 60, "height": 60 },
+        "vip": { "width": 60, "height": 60 }
+    }
+}
