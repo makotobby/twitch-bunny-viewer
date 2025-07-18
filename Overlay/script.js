@@ -20,7 +20,7 @@ let config = {
 const bunnyTypes = [
     'BlackWhite', 'Brown2Color', 'BrownWhite', 'BunnyBlack', 
     'BunnyBrown', 'DemonicBunny', 'FantasyBunny', 'GreyBunny', 
-    'LightBrown', 'WhiteBunny'
+    'LightBrown', 'WhiteBunny', 'BlueBunny'
 ];
 
 // Store sprite URLs - update paths to match your StreamElements uploads
@@ -154,7 +154,7 @@ async function getBroadcasterId() {
     }
 }
 
-// Modify fetchViewers to handle async processing
+// Modify fetchViewers to handle async processing and better role detection
 async function fetchViewers() {
     if (!broadcasterId) {
         console.error('No broadcaster ID available');
@@ -162,7 +162,7 @@ async function fetchViewers() {
     }
     
     try {
-        // Get user ID of the authorized user (the moderator)
+        // Get user ID of the authorized user
         if (!config.userId) {
             // First, get the authorized user's ID
             const userResponse = await fetch('https://api.twitch.tv/helix/users', {
@@ -181,10 +181,8 @@ async function fetchViewers() {
                 config.userId = userData.data[0].id;
                 config.userLogin = userData.data[0].login;
                 
-                // Add the logged-in moderator as a bunny too if they're not the broadcaster
-                if (config.userId !== broadcasterId) {
-                    addBunny(userData.data[0].display_name, 'mod', config.userId);
-                }
+                // Don't automatically add authenticated user as mod here
+                // Let the proper mod check handle this
             } else {
                 throw new Error('Could not get user information');
             }
@@ -210,31 +208,26 @@ async function fetchViewers() {
         const data = await response.json();
         const currentViewers = new Set();
         
-        // Process viewers data with async handling
+        // Process viewers data with async handling - start with no role
         if (data.data) {
             // Create array of promises for processing viewers
             const viewerPromises = data.data.map(async viewer => {
                 const username = viewer.user_name;
                 const userId = viewer.user_id;
                 
-                // Determine viewer type
+                // Initialize everyone as a regular viewer - roles will be assigned later
                 let viewerType = 'viewer';
                 
+                // Only the broadcaster gets immediate role assignment
                 if (userId === broadcasterId) {
                     viewerType = 'streamer';
-                    currentViewers.add(username.toLowerCase());
-                    await addBunny(username, viewerType, userId);
-                } else if (userId === config.userId) {
-                    viewerType = 'mod';
-                    currentViewers.add(username.toLowerCase());
-                    await addBunny(username, viewerType, userId);
-                } else {
-                    // For regular viewers, check follower status if in followers-only mode
-                    if (!config.followersOnly || await checkFollowerStatus(username, userId)) {
-                        currentViewers.add(username.toLowerCase());
-                        await addBunny(username, viewerType, userId);
-                    }
                 }
+                
+                // Add to current viewers
+                currentViewers.add(username.toLowerCase());
+                
+                // Add bunny - other roles will be applied in the role-specific API calls
+                await addBunny(username, viewerType, userId);
             });
             
             // Wait for all viewer processing to complete
@@ -243,19 +236,19 @@ async function fetchViewers() {
             isConnected = true;
         }
         
-        // Skip special user checks if you have permission issues
+        // Now properly check for roles using specific API endpoints
         try {
-            // Check for VIPs separately
-            await fetchVIPs(currentViewers);
-        } catch (e) {
-            console.error('Error fetching VIPs:', e);
-        }
-        
-        try {
-            // Check for moderators separately
+            // Check for moderators
             await fetchModerators(currentViewers);
         } catch (e) {
             console.error('Error fetching moderators:', e);
+        }
+        
+        try {
+            // Check for VIPs
+            await fetchVIPs(currentViewers);
+        } catch (e) {
+            console.error('Error fetching VIPs:', e);
         }
         
         // Remove bunnies for viewers who left
@@ -403,18 +396,50 @@ async function checkFollowerStatus(username, userId) {
     }
 }
 
-// Connect to Twitch chat for real-time updates
+// Connect to Twitch chat using IRC WebSocket - improved version
 function connectToTwitchChat() {
+    // Skip TMI.js attempt and go directly to IRC method
+    connectWithIRC();
+}
+
+// Connect to Twitch chat using IRC WebSocket - improved version
+function connectWithIRC() {
+    console.log('Connecting to Twitch chat via IRC WebSocket');
     const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
     
+    let pingInterval;
+    let reconnectTimeout;
+    let hasJoinedChannel = false;
+    
     ws.onopen = () => {
-        console.log('Connected to Twitch chat');
+        console.log('Connected to Twitch chat (IRC)');
+        
+        // Clear any existing reconnect timeout
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+        }
+        
+        // Set up regular pings to keep connection alive
+        pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('PING :tmi.twitch.tv');
+            }
+        }, 60000); // Send a ping every minute
         
         // Anonymous connection for just listening
         ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership');
         ws.send('PASS SCHMOOPIIE');
         ws.send('NICK justinfan' + Math.floor(Math.random() * 100000));
         ws.send(`JOIN #${config.channelName.toLowerCase()}`);
+        
+        // Set a timeout to check if we've joined the channel
+        setTimeout(() => {
+            if (!hasJoinedChannel) {
+                console.error('Failed to join channel within timeout, reconnecting...');
+                ws.close();
+            }
+        }, 10000); // 10 second timeout
     };
     
     ws.onmessage = (event) => {
@@ -426,73 +451,131 @@ function connectToTwitchChat() {
             return;
         }
         
-        // Parse and process chat messages for interaction
-        handleChatMessage(message);
+        // Check if we actually joined the channel
+        if (message.includes(`JOIN #${config.channelName.toLowerCase()}`)) {
+            console.log('Successfully joined channel');
+            hasJoinedChannel = true;
+        }
+
+        console.log(event);
+        console.log(message);
+        
+        // Parse and process chat messages
+        if (message.includes('PRIVMSG')) {
+            try {
+                handleChatMessage(message);
+            } catch (error) {
+                console.error('Error handling chat message:', error);
+            }
+        }
     };
     
     ws.onerror = (error) => {
         console.error('WebSocket Error:', error);
+        
+        // Clean up
+        if (pingInterval) {
+            clearInterval(pingInterval);
+        }
     };
     
     ws.onclose = () => {
         console.log('Disconnected from Twitch chat');
+        
+        // Clean up
+        if (pingInterval) {
+            clearInterval(pingInterval);
+        }
+        
         // Try to reconnect after a delay
-        setTimeout(connectToTwitchChat, 5000);
+        reconnectTimeout = setTimeout(() => {
+            console.log('Attempting to reconnect...');
+            connectWithIRC();
+        }, 5000);
     };
 }
 
 // Handle chat messages to make bunnies interact
 function handleChatMessage(message) {
-    // PRIVMSG format with tags
-    if (message.includes(' PRIVMSG ')) {
-        // Extract user details
-        const userMatch = message.match(/:([^!]+)!/);
-        const msgContentMatch = message.match(/ PRIVMSG #[^ ]+ :(.+)$/);
+    try {
+        console.log("Processing message:", message);
         
-        if (userMatch && userMatch[1]) {
-            const username = userMatch[1];
-            const normalizedUsername = username.toLowerCase();
-            
-            // Handle color selection commands if present
-            if (msgContentMatch && msgContentMatch[1]) {
-                const messageContent = msgContentMatch[1].trim();
-                if (messageContent.startsWith('!bunny ')) {
-                    const colorChoice = messageContent.substring(7).trim().toLowerCase();
-                    handleBunnyColorCommand(normalizedUsername, colorChoice);
-                }
-            }
-            
-            // Make bunny hop when user chats
-            if (bunnies[normalizedUsername]) {
-                makeBunnyHop(normalizedUsername);
-            }
-            
-            // Check for badges to update bunny types
-            if (message.includes('badges=')) {
-                const badgesMatch = message.match(/badges=([^;]*)/);
-                if (badgesMatch && badgesMatch[1]) {
-                    const badges = badgesMatch[1];
-                    
-                    if (badges.includes('broadcaster')) {
-                        updateBunnyType(normalizedUsername, 'streamer');
-                    } else if (badges.includes('moderator')) {
-                        updateBunnyType(normalizedUsername, 'mod');
-                    } else if (badges.includes('vip')) {
-                        updateBunnyType(normalizedUsername, 'vip');
-                    }
+        // Extract username from IRC message - try display-name first, then username
+        let username;
+        const displayNameMatch = message.match(/display-name=([^;]+)/);
+        if (displayNameMatch && displayNameMatch[1]) {
+            username = displayNameMatch[1];
+        } else {
+            const userMatch = message.match(/:([^!]+)!/);
+            if (!userMatch || !userMatch[1]) return;
+            username = userMatch[1];
+        }
+        
+        const normalizedUsername = username.toLowerCase();
+        console.log("Username extracted:", username);
+        
+        // Extract the actual message content - updated to handle \r\n
+        const msgContentMatch = message.match(/ PRIVMSG #[^ ]+ :(.+?)(?:\r\n|\r|\n|$)/);
+        if (!msgContentMatch || !msgContentMatch[1]) {
+            console.log("Failed to extract message content");
+            return;
+        }
+        
+        const messageContent = msgContentMatch[1].trim();
+        console.log("Message extracted:", messageContent);
+        
+        // Handle color selection commands
+        if (messageContent.startsWith('!bunny ')) {
+            console.log("Detected !bunny command");
+            const colorChoice = messageContent.substring(7).trim().toLowerCase();
+            console.log("Color choice:", colorChoice);
+            handleBunnyColorCommand(normalizedUsername, colorChoice);
+        } else if (messageContent.startsWith('!bunnycolor ')) {
+            const colorChoice = messageContent.substring(11).trim().toLowerCase();
+            handleBunnyColorCommand(normalizedUsername, colorChoice);
+        } else if (messageContent.startsWith('!bunnycolour ')) {
+            const colorChoice = messageContent.substring(12).trim().toLowerCase();
+            handleBunnyColorCommand(normalizedUsername, colorChoice);
+        } else if (bunnies[normalizedUsername]) {
+            // Regular message, show chat bubble for non-command messages
+            // Limit chat bubble text length
+            const shortMessage = messageContent.length > 25 ? 
+                messageContent.substring(0, 22) + '...' : 
+                messageContent;
+            showChatBubble(normalizedUsername, shortMessage);
+            makeBunnyHop(normalizedUsername);
+        }
+        
+        // Check for badges to update bunny types
+        if (message.includes('badges=')) {
+            const badgesMatch = message.match(/badges=([^;]*)/);
+            if (badgesMatch && badgesMatch[1]) {
+                const badges = badgesMatch[1];
+                
+                if (badges.includes('broadcaster/1')) {
+                    updateBunnyType(normalizedUsername, 'streamer');
+                } else if (badges.includes('moderator/1')) {
+                    updateBunnyType(normalizedUsername, 'mod');
+                } else if (badges.includes('vip/1')) {
+                    updateBunnyType(normalizedUsername, 'vip');
                 }
             }
         }
+    } catch (error) {
+        console.error('Error processing chat message:', error, message);
     }
 }
 
 // Handle bunny color selection commands
 function handleBunnyColorCommand(username, colorChoice) {
+    console.log(`Handling color command for ${username} with choice: ${colorChoice}`);
+    
     // Normalize color choice to match the expected format
     colorChoice = colorChoice.toLowerCase();
     
     // List command - show available bunny types
     if (colorChoice === 'list') {
+        console.log(`List command detected for ${username}`);
         if (bunnies[username]) {
             makeBunnyHop(username);
         }
@@ -528,6 +611,8 @@ function handleBunnyColorCommand(username, colorChoice) {
         'random': '' 
     };
     
+    console.log(`Color map entry for ${colorChoice}: ${colorMap[colorChoice]}`);
+    
     // Check if valid color choice - try exact match first, then try direct folder name match
     let bunnyType = colorMap[colorChoice];
     
@@ -535,10 +620,12 @@ function handleBunnyColorCommand(username, colorChoice) {
         // If not in our map but matches a folder name directly, use the folder name
         const exactTypeMatch = bunnyTypes.find(type => type.toLowerCase() === colorChoice);
         bunnyType = exactTypeMatch;
+        console.log(`Found matching folder name: ${exactTypeMatch}`);
     }
     
     // Invalid color - ignore the command
     if (!bunnyType && colorChoice !== 'list') {
+        console.log(`Invalid color choice: ${colorChoice}`);
         return;
     }
     
@@ -549,48 +636,65 @@ function handleBunnyColorCommand(username, colorChoice) {
     
     if (colorChoice === 'random') {
         delete userPreferences[username].bunnyType;
+        console.log(`Setting random color for ${username}`);
     } else {
         userPreferences[username].bunnyType = bunnyType;
+        console.log(`Setting color preference for ${username} to ${bunnyType}`);
     }
     
     // If user has an active bunny, update it immediately
     if (bunnies[username]) {
+        console.log(`Updating sprite for ${username}'s bunny`);
         updateBunnySprite(username);
         // Make bunny hop to acknowledge the change
         makeBunnyHop(username);
+    } else {
+        console.log(`No active bunny found for ${username}`);
     }
 }
 
 // Update a bunny's sprite based on user color preference
 function updateBunnySprite(username) {
     const normalizedUsername = username.toLowerCase();
-    if (!bunnies[normalizedUsername]) return;
+    console.log(`Updating sprite for ${normalizedUsername}`);
     
-    const bunny = bunnies[normalizedUsername];
     
-    // Only allow customization for regular viewers
-    if (bunny.type !== 'viewer') return;
-    
-    // Determine sprite variant
-    let spriteVariant;
-    if (userPreferences[normalizedUsername]?.bunnyType) {
-        const preferredType = userPreferences[normalizedUsername].bunnyType;
-        spriteVariant = bunnyTypes.indexOf(preferredType);
-        if (spriteVariant === -1) {
-            // Fallback to current variant if preference is invalid
-            spriteVariant = bunny.spriteVariant;
-        }
-    } else {
-        // Keep current variant if no preference
-        spriteVariant = bunny.spriteVariant;
+    if (!bunnies[normalizedUsername]) {
+        console.log(`No bunny found for ${normalizedUsername}`);
+        return;
     }
     
-    // Update sprites
-    bunny.spriteVariant = spriteVariant;
-    bunny.sprites = {
-        idle: bunnySprites.viewer.idle[spriteVariant],
-        running: bunnySprites.viewer.running[spriteVariant]
-    };
+    const bunny = bunnies[normalizedUsername];
+    console.log(`Found bunny with type: ${bunny.type}`);
+    
+    // For all users, check if they have a color preference
+    if (userPreferences[normalizedUsername]?.bunnyType) {
+        const preferredType = userPreferences[normalizedUsername].bunnyType;
+        console.log(`User has preference: ${preferredType}`);
+        
+        // Find the sprite variant for this preference
+        const spriteVariant = bunnyTypes.indexOf(preferredType);
+        console.log(`Sprite variant index: ${spriteVariant}`);
+        
+        if (spriteVariant !== -1) {
+            // Set the sprite variant
+            bunny.spriteVariant = spriteVariant;
+            
+            // All users use the same sprite array
+            bunny.sprites = {
+                idle: bunnySprites.viewer.idle[spriteVariant],
+                running: bunnySprites.viewer.running[spriteVariant]
+            };
+            
+            console.log(`New idle sprite: ${bunny.sprites.idle}`);
+            console.log(`New running sprite: ${bunny.sprites.running}`);
+        } else {
+            console.log(`Invalid preference, keeping current variant: ${bunny.spriteVariant}`);
+        }
+    } else {
+        // No color preference set - use default for user type
+        console.log(`No preference found for ${normalizedUsername}`);
+    }
     
     // Update current animation
     updateBunnyAnimation(normalizedUsername, bunny.animationState);
@@ -612,9 +716,10 @@ function updateBunnyType(username, newType) {
 
 // Update bunny appearance based on type
 function updateBunnyAppearance(username) {
-    if (!bunnies[username]) return;
+    const normalizedUsername = username.toLowerCase();
+    if (!bunnies[normalizedUsername]) return;
     
-    const bunny = bunnies[username];
+    const bunny = bunnies[normalizedUsername];
     const type = bunny.type;
     
     // Update CSS classes
@@ -623,8 +728,14 @@ function updateBunnyAppearance(username) {
     if (type === 'mod') bunny.element.classList.add('mod-bunny');
     if (type === 'vip') bunny.element.classList.add('vip-bunny');
     
-    // Update sprites based on type
-    if (type === 'streamer') {
+    // Check if user has a color preference first
+    if (userPreferences[normalizedUsername]?.bunnyType) {
+        // If user has color preference, don't override it
+        console.log(`User ${normalizedUsername} has a color preference, preserving it`);
+        updateBunnySprite(normalizedUsername);
+    }
+    // Only update sprites if no user preference is set
+    else if (type === 'streamer') {
         bunny.sprites = {
             idle: bunnySprites.streamer.idle,
             running: bunnySprites.streamer.running
@@ -648,7 +759,7 @@ function updateBunnyAppearance(username) {
     bunny.element.style.height = `${bunny.height}px`;
     
     // Update animation
-    updateBunnyAnimation(username, bunny.animationState);
+    updateBunnyAnimation(normalizedUsername, bunny.animationState);
 }
 
 // Remove inactive viewers
@@ -668,7 +779,15 @@ function removeInactiveViewers(currentViewers) {
 async function addBunny(username, type = 'viewer', userId = null) {
     // Normalize username for comparison
     const normalizedUsername = username.toLowerCase();
-    
+
+    // Special case: assign BlueBunny to BlueLightning714
+    if (normalizedUsername === 'bluelightning714') {
+        if (!userPreferences[normalizedUsername]) {
+            userPreferences[normalizedUsername] = {};
+        }
+        userPreferences[normalizedUsername].bunnyType = 'BlueBunny';
+    }
+
     // If the bunny already exists, just update its type if needed
     if (bunnies[normalizedUsername]) {
         // Only upgrade viewer types, never downgrade
@@ -707,36 +826,56 @@ async function addBunny(username, type = 'viewer', userId = null) {
     const containerWidth = gameContainer.offsetWidth;
     const x = Math.random() * (containerWidth - 60);
     
-    // Determine sprite variant for viewer
+    // Determine sprite variant
     let spriteVariant;
+    let idleSprite, runningSprite;
     
-    if (type === 'viewer' && userPreferences[normalizedUsername]?.bunnyType) {
+    // First check if user has a color preference
+    if (userPreferences[normalizedUsername]?.bunnyType) {
         // Use user's preferred bunny type
         const preferredType = userPreferences[normalizedUsername].bunnyType;
         spriteVariant = bunnyTypes.indexOf(preferredType);
-        if (spriteVariant === -1) {
-            // Fallback to random if preference is invalid
+        
+        if (spriteVariant !== -1) {
+            // Use the user's preferred color, regardless of user type
+            idleSprite = bunnySprites.viewer.idle[spriteVariant];
+            runningSprite = bunnySprites.viewer.running[spriteVariant];
+            console.log(`Using ${normalizedUsername}'s preferred color: ${preferredType}`);
+        } else {
+            // Fallback to type-specific default if preference is invalid
             spriteVariant = Math.floor(Math.random() * bunnyTypes.length);
+            // Use default sprites for this user type
+            if (type === 'streamer') {
+                idleSprite = bunnySprites.streamer.idle;
+                runningSprite = bunnySprites.streamer.running;
+            } else if (type === 'mod') {
+                idleSprite = bunnySprites.mod.idle;
+                runningSprite = bunnySprites.mod.running;
+            } else if (type === 'vip') {
+                idleSprite = bunnySprites.vip.idle;
+                runningSprite = bunnySprites.vip.running;
+            } else {
+                idleSprite = bunnySprites.viewer.idle[spriteVariant];
+                runningSprite = bunnySprites.viewer.running[spriteVariant];
+            }
         }
     } else {
-        // Random variant for viewers without preference
+        // No user preference, use defaults by type
         spriteVariant = Math.floor(Math.random() * bunnyTypes.length);
-    }
-    
-    // Choose sprite based on type
-    let idleSprite, runningSprite;
-    if (type === 'streamer') {
-        idleSprite = bunnySprites.streamer.idle;
-        runningSprite = bunnySprites.streamer.running;
-    } else if (type === 'mod') {
-        idleSprite = bunnySprites.mod.idle;
-        runningSprite = bunnySprites.mod.running;
-    } else if (type === 'vip') {
-        idleSprite = bunnySprites.vip.idle;
-        runningSprite = bunnySprites.vip.running;
-    } else {
-        idleSprite = bunnySprites.viewer.idle[spriteVariant];
-        runningSprite = bunnySprites.viewer.running[spriteVariant];
+        
+        if (type === 'streamer') {
+            idleSprite = bunnySprites.streamer.idle;
+            runningSprite = bunnySprites.streamer.running;
+        } else if (type === 'mod') {
+            idleSprite = bunnySprites.mod.idle;
+            runningSprite = bunnySprites.mod.running;
+        } else if (type === 'vip') {
+            idleSprite = bunnySprites.vip.idle;
+            runningSprite = bunnySprites.vip.running;
+        } else {
+            idleSprite = bunnySprites.viewer.idle[spriteVariant];
+            runningSprite = bunnySprites.viewer.running[spriteVariant];
+        }
     }
     
     // Initially use idle sprite with animation
@@ -746,6 +885,7 @@ async function addBunny(username, type = 'viewer', userId = null) {
     const nameElement = document.createElement('div');
     nameElement.className = 'bunny-name';
     nameElement.textContent = username;
+    nameElement.style.bottom = '0px'; // Position closer to bunny
     bunnyElement.appendChild(nameElement);
     
     gameContainer.appendChild(bunnyElement);
@@ -782,7 +922,10 @@ async function addBunny(username, type = 'viewer', userId = null) {
     bunnyElement.style.width = `${bunnyWidth}px`;
     bunnyElement.style.height = `${bunnyHeight}px`;
     
-    // Apply initial direction
+    // Apply initial position
+    bunnyElement.style.left = `${x}px`;
+    
+    // Apply initial direction and transform
     updateBunnyDirection(normalizedUsername);
 }
 
@@ -798,7 +941,7 @@ function removeBunny(username) {
     delete bunnies[normalizedUsername];
 }
 
-// Make a bunny hop
+// Make a bunny hop with dynamic height based on speed
 function makeBunnyHop(username) {
     const normalizedUsername = username.toLowerCase();
     if (!bunnies[normalizedUsername] || bunnies[normalizedUsername].isHopping) return;
@@ -815,24 +958,40 @@ function makeBunnyHop(username) {
     // Store previous movement state
     const wasMoving = bunny.isMoving;
     
-    // Add hopping class for animation
-    bunny.element.classList.add('bunny-hopping');
+    // Calculate hop intensity based on movement speed
+    const speed = Math.abs(bunny.targetX - bunny.x);
+    const hopIntensity = Math.min(1, speed / 100); // Normalize, max 1
+    const hopHeight = 20 + (hopIntensity * 30); // Between 20-50px
+    const hopDuration = 300 + (200 * (1 - hopIntensity)); // Faster when moving fast
+    
+    // Apply dynamic hop animation
+    bunny.element.style.transition = `transform ${hopDuration}ms cubic-bezier(0.5, 0, 0.5, 1)`;
+    bunny.element.style.transform = `${bunny.direction === 'left' ? 'scaleX(-1)' : 'scaleX(1)'} translateY(-${hopHeight}px)`;
     
     // Reset after animation completes
     setTimeout(() => {
         if (bunnies[normalizedUsername]) {
-            bunnies[normalizedUsername].isHopping = false;
-            bunnies[normalizedUsername].element.classList.remove('bunny-hopping');
+            // Reset transform but keep direction
+            bunny.element.style.transition = `transform 200ms cubic-bezier(0.5, 0, 0.5, 1)`;
+            bunny.element.style.transform = bunny.direction === 'left' ? 'scaleX(-1)' : 'scaleX(1)';
             
-            // Restore animation state
-            if (wasMoving && !bunnies[normalizedUsername].pauseMovement) {
-                bunnies[normalizedUsername].isMoving = true;
-                updateBunnyAnimation(normalizedUsername, 'running');
-            } else {
-                updateBunnyAnimation(normalizedUsername, 'idle');
-            }
+            // After landing animation is complete
+            setTimeout(() => {
+                if (bunnies[normalizedUsername]) {
+                    bunny.element.style.transition = ''; // Remove transition
+                    bunnies[normalizedUsername].isHopping = false;
+                    
+                    // Restore animation state
+                    if (wasMoving && !bunnies[normalizedUsername].pauseMovement) {
+                        bunnies[normalizedUsername].isMoving = true;
+                        updateBunnyAnimation(normalizedUsername, 'running');
+                    } else {
+                        updateBunnyAnimation(normalizedUsername, 'idle');
+                    }
+                }
+            }, 200);
         }
-    }, 500);
+    }, hopDuration);
 }
 
 // Update bunny direction
@@ -846,10 +1005,25 @@ function updateBunnyDirection(username) {
     // Apply the direction to the bunny element
     if (bunny.direction === 'left') {
         bunny.element.style.transform = 'scaleX(-1)';
+        
         // Make sure name doesn't flip
         const nameElement = bunny.element.querySelector('.bunny-name');
         if (nameElement) {
             nameElement.style.transform = 'translateX(-50%) scaleX(-1)';
+        }
+        
+        // Update any existing chat bubble for left-facing bunny
+        const bubbleContainer = bunny.element.querySelector('.chat-bubble-container');
+        if (bubbleContainer) {
+            // Add left-facing class and keep centered
+            bubbleContainer.classList.add('left-facing');
+            bubbleContainer.style.transform = 'translateX(-50%)';
+            
+            // Keep the bubble text readable (no transform)
+            const chatBubble = bubbleContainer.querySelector('.chat-bubble');
+            if (chatBubble) {
+                chatBubble.style.transform = 'none';
+            }
         }
         
         // Ensure target is to the left of current position
@@ -860,10 +1034,24 @@ function updateBunnyDirection(username) {
         }
     } else {
         bunny.element.style.transform = 'scaleX(1)';
+        
         // Reset name transform
         const nameElement = bunny.element.querySelector('.bunny-name');
         if (nameElement) {
             nameElement.style.transform = 'translateX(-50%)';
+        }
+        
+        // Update any existing chat bubble for right-facing bunny
+        const bubbleContainer = bunny.element.querySelector('.chat-bubble-container');
+        if (bubbleContainer) {
+            // Remove left-facing class and keep centered
+            bubbleContainer.style.transform = 'translateX(-50%)';
+            
+            // Regular transform for right-facing bunny
+            const chatBubble = bubbleContainer.querySelector('.chat-bubble');
+            if (chatBubble) {
+                chatBubble.style.transform = 'none';
+            }
         }
         
         // Ensure target is to the right of current position
@@ -994,3 +1182,107 @@ window.addEventListener('resize', () => {
         }
     });
 });
+
+// Show a chat bubble above a bunny
+function showChatBubble(username, text) {
+    const normalizedUsername = username.toLowerCase();
+    if (!bunnies[normalizedUsername]) return;
+    
+    // Remove any existing chat bubble
+    const existingBubble = document.querySelector(`.chat-bubble-for-${normalizedUsername}`);
+    if (existingBubble) {
+        existingBubble.remove();
+    }
+    
+    const bunny = bunnies[normalizedUsername];
+    
+    // Create a standalone bubble element positioned absolutely in the game container
+    const bubbleElement = document.createElement('div');
+    bubbleElement.className = `chat-bubble chat-bubble-for-${normalizedUsername}`;
+    bubbleElement.style.position = 'absolute';
+    bubbleElement.style.zIndex = '100';
+    bubbleElement.style.backgroundColor = 'white';
+    bubbleElement.style.border = '2px solid #333';
+    bubbleElement.style.borderRadius = '12px';
+    bubbleElement.style.padding = '4px 8px';
+    bubbleElement.style.fontSize = '14px';
+    bubbleElement.style.whiteSpace = 'nowrap';
+    bubbleElement.style.pointerEvents = 'none'; // Don't block clicks
+    
+    // Set text content
+    bubbleElement.textContent = text;
+    
+    // Check if the string length is too long and adjust size or truncate
+    const maxLength = 30;
+    if (text.length > maxLength) {
+        bubbleElement.textContent = text.substring(0, maxLength - 3) + '...';
+    }
+    
+    // If text is very long, allow multiple lines
+    if (text.length > 20) {
+        bubbleElement.style.maxWidth = '150px';
+        bubbleElement.style.whiteSpace = 'normal';
+    }
+    
+    // Add a speech bubble tail/pointer
+    const tail = document.createElement('div');
+    tail.style.position = 'absolute';
+    tail.style.bottom = '-6px';
+    tail.style.left = '50%';
+    tail.style.transform = 'translateX(-50%) rotate(45deg)';
+    tail.style.width = '10px';
+    tail.style.height = '10px';
+    tail.style.backgroundColor = 'white';
+    tail.style.border = 'inherit';
+    tail.style.borderTop = 'none';
+    tail.style.borderLeft = 'none';
+    bubbleElement.appendChild(tail);
+    
+    // Add the bubble to the game container (not as child of the bunny)
+    gameContainer.appendChild(bubbleElement);
+    
+    // Initial positioning
+    updateBubblePosition();
+    
+    // Function to update the bubble's position based on bunny position and animation
+    function updateBubblePosition() {
+        if (!bunnies[normalizedUsername]) {
+            // Bunny was removed, clean up the bubble
+            if (bubbleElement.parentNode) {
+                bubbleElement.parentNode.removeChild(bubbleElement);
+            }
+            return;
+        }
+        
+        // Get current bunny position from DOM to capture ALL transforms including hops
+        const bunnyRect = bunny.element.getBoundingClientRect();
+        const containerRect = gameContainer.getBoundingClientRect();
+        
+        // Calculate position that follows the bunny's actual position including hops
+        const bubbleX = bunny.x + (bunny.width / 2);
+        
+        // Get the actual top position of the bunny including any CSS transforms for hopping
+        // This makes the bubble follow during jumps
+        const actualBunnyTop = bunnyRect.top - containerRect.top;
+        
+        // Position above the bunny with proper spacing
+        const bubbleY = actualBunnyTop - bubbleElement.offsetHeight - 10;
+        
+        // Apply position
+        bubbleElement.style.left = `${bubbleX}px`;
+        bubbleElement.style.top = `${Math.max(5, bubbleY)}px`; // Ensure bubble doesn't go off the top
+        bubbleElement.style.transform = 'translateX(-50%)';
+    }
+    
+    // Create an interval to update the bubble position with high frequency
+    // This is essential to keep the bubble smoothly following the bunny during hops
+    const positionInterval = setInterval(updateBubblePosition, 16); // ~60fps update rate
+    
+    // Remove after a delay
+    setTimeout(() => {
+        clearInterval(positionInterval);
+        if (bubbleElement.parentNode) {
+            bubbleElement.parentNode.removeChild(bubbleElement);
+        }
+    }, 5000);
+}
